@@ -6,13 +6,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Todo struct {
-	ID   int    `json:"id"`
-	Text string `json:"text"`
-	Done bool   `json:"done"`
-	Date Date   `json: "date"`
+	ID   int       `json:"id"`
+	Text string    `json:"text"`
+	Done bool      `json:"done"`
+	Date time.Time `json:"date"`
 }
 
 // Todos is an in-memory todo store. The mutex guards it because
@@ -57,7 +58,7 @@ func (t *Todos) create(w http.ResponseWriter, r *http.Request) {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	todo := Todo{ID: t.nextID, Text: text}
+	todo := Todo{ID: t.nextID, Text: text, Date: time.Now()}
 	t.nextID++
 	t.items = append(t.items, todo)
 	writeJSON(w, http.StatusCreated, todo)
