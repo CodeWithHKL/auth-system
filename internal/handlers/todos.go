@@ -33,6 +33,7 @@ func (t *Todos) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/todos", t.list)
 	mux.HandleFunc("POST /api/todos", t.create)
 	mux.HandleFunc("PATCH /api/todos/{id}", t.toggle)
+	mux.HandleFunc("PUT /api/todos/{id}", t.update)
 	mux.HandleFunc("DELETE /api/todos/{id}", t.remove)
 }
 
@@ -76,6 +77,38 @@ func (t *Todos) toggle(w http.ResponseWriter, r *http.Request) {
 	for i := range t.items {
 		if t.items[i].ID == id {
 			t.items[i].Done = !t.items[i].Done
+			writeJSON(w, http.StatusOK, t.items[i])
+			return
+		}
+	}
+	http.NotFound(w, r)
+}
+
+// update replaces the text of an existing todo.
+func (t *Todos) update(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var in struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	text := strings.TrimSpace(in.Text)
+	if text == "" {
+		http.Error(w, "text is required", http.StatusBadRequest)
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for i := range t.items {
+		if t.items[i].ID == id {
+			t.items[i].Text = text
 			writeJSON(w, http.StatusOK, t.items[i])
 			return
 		}
