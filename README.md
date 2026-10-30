@@ -1,5 +1,7 @@
 # auth-system
 
+[![CI](https://github.com/CodeWithHKL/auth-system/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeWithHKL/auth-system/actions/workflows/ci.yml)
+
 A small, complete login / signup system: a Go API backed by PostgreSQL and a Svelte single-page UI. Accounts are stored with bcrypt-hashed passwords, and sessions are signed JWTs kept in an HttpOnly cookie, so the server holds no session state and can run as many replicas (or serverless instances) as you like.
 
 **Live demo:** https://hkl-auth-system.vercel.app
@@ -127,6 +129,8 @@ go test ./...                 # handler tests use an in-memory store, so no data
 TEST_DATABASE_URL='postgres://myapp:myapp@localhost:5433/myapp?sslmode=disable' go test ./internal/store   # limiter SQL against a real database
 cd web && npm run check       # svelte-check + TypeScript
 ```
+
+CI (`.github/workflows/ci.yml`) runs gofmt, `go vet`, `go build`, `go test`, the UI type check and the UI build on every push to `main` and every pull request.
 
 ## Deployment: Vercel + Supabase
 

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    name: Go API
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: myapp
+          POSTGRES_PASSWORD: myapp
+          POSTGRES_DB: myapp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U myapp"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      # Database-backed tests skip themselves when this is unset.
+      TEST_DATABASE_URL: postgres://myapp:myapp@localhost:5432/myapp?sslmode=disable&default_query_exec_mode=simple_protocol
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      # Also compiles api/ and serverless/, which Vercel builds separately.
+      - run: go build ./...
+      - run: go test ./...
+
+  web:
+    name: Svelte UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
