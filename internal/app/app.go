@@ -21,6 +21,8 @@ func NewHandler(cfg config.Config, db *store.Postgres) http.Handler {
 		w.WriteHeader(http.StatusOK)
 	})
 	tokens := auth.NewTokens(cfg.JWTSecret, cfg.TokenTTL)
-	auth.New(db, tokens, cfg.SecureCookie, int(cfg.TokenTTL.Seconds())).Register(mux)
+	auth.New(db, tokens, cfg.SecureCookie, int(cfg.TokenTTL.Seconds())).
+		WithLoginLimiter(db, cfg.TrustProxy).
+		Register(mux)
 	return mux
 }

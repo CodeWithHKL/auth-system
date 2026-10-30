@@ -26,3 +26,18 @@ type Users interface {
 	ByEmail(ctx context.Context, email string) (User, error)
 	ByID(ctx context.Context, id int64) (User, error)
 }
+
+// Limit says a key may fail at most Max times per window.
+type Limit struct {
+	Key string
+	Max int
+}
+
+// LoginLimiter counts failed logins across all server instances. Keys are
+// opaque strings chosen by the caller.
+type LoginLimiter interface {
+	// RetryAfter returns how long to wait if any limit has been reached, else 0.
+	RetryAfter(ctx context.Context, window time.Duration, limits []Limit) (time.Duration, error)
+	RecordFailure(ctx context.Context, window time.Duration, keys ...string) error
+	Clear(ctx context.Context, key string) error
+}
