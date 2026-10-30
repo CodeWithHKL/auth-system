@@ -9,6 +9,7 @@
   let name = $state('')
   let email = $state('')
   let password = $state('')
+  let confirm = $state('')
   let showPassword = $state(false)
   let busy = $state(false)
   let formError = $state('')
@@ -40,6 +41,7 @@
     mode = next
     formError = ''
     fieldErrors = {}
+    confirm = ''
   }
 
   function validate(): Record<string, string> {
@@ -48,6 +50,7 @@
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) errs.email = 'Enter a valid email address'
     if (!password) errs.password = 'Password is required'
     else if (mode === 'signup' && password.length < 8) errs.password = 'Use at least 8 characters'
+    if (mode === 'signup' && !errs.password && confirm !== password) errs.confirm = 'Passwords do not match'
     return errs
   }
 
@@ -155,6 +158,20 @@
       {#if strength.score < 3 && (strength.warning || strength.suggestion)}
         <p class="hint">{strength.warning || strength.suggestion}</p>
       {/if}
+    {/if}
+
+    {#if mode === 'signup'}
+      <div class="field" class:invalid={fieldErrors.confirm}>
+        <input
+          id="confirm"
+          type={showPassword ? 'text' : 'password'}
+          placeholder=" "
+          autocomplete="new-password"
+          bind:value={confirm}
+        />
+        <label for="confirm">Confirm password</label>
+        {#if fieldErrors.confirm}<small role="alert">{fieldErrors.confirm}</small>{/if}
+      </div>
     {/if}
 
     {#if formError}<p class="form-error" role="alert">{formError}</p>{/if}
