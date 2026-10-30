@@ -2,12 +2,18 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/mail"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
@@ -21,6 +27,13 @@ const (
 	maxPassword = 72 // bcrypt ignores everything past 72 bytes
 	maxName     = 80
 	maxBody     = 1 << 20
+
+	// Failed logins are counted per client IP and per email over loginWindow.
+	// The IP limit is higher so one address (an office, a school) is not locked
+	// out by a few typos; the email limit slows guessing against one account.
+	loginWindow         = 15 * time.Minute
+	maxFailuresPerIP    = 20
+	maxFailuresPerEmail = 10
 )
 
 // dummyHash lets login spend the same bcrypt time for unknown emails as for
@@ -28,14 +41,24 @@ const (
 var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("not-a-real-password"), bcrypt.DefaultCost)
 
 type Handler struct {
-	users  store.Users
-	tokens *Tokens
-	secure bool
-	ttlSec int
+	users      store.Users
+	tokens     *Tokens
+	secure     bool
+	ttlSec     int
+	limiter    store.LoginLimiter // nil disables login rate limiting
+	trustProxy bool
 }
 
 func New(users store.Users, tokens *Tokens, secureCookie bool, ttlSeconds int) *Handler {
 	return &Handler{users: users, tokens: tokens, secure: secureCookie, ttlSec: ttlSeconds}
+}
+
+// WithLoginLimiter turns on login rate limiting. Set trustProxy only when the
+// server sits behind a proxy that overwrites X-Real-IP / X-Forwarded-For (as
+// Vercel does); otherwise clients could pick their own IP and dodge the limit.
+func (h *Handler) WithLoginLimiter(l store.LoginLimiter, trustProxy bool) *Handler {
+	h.limiter, h.trustProxy = l, trustProxy
+	return h
 }
 
 // Register wires the auth routes onto mux (method+path patterns need Go 1.22+).
@@ -95,6 +118,25 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	in.Email = strings.TrimSpace(in.Email)
 
+	ipKey := "ip:" + clientIP(r, h.trustProxy)
+	emailKey := "email:" + hashEmail(in.Email)
+	if h.limiter != nil {
+		// Checked before bcrypt so blocked guesses cost no CPU and, being
+		// rejected here, are not counted again (the window does not extend).
+		wait, err := h.limiter.RetryAfter(r.Context(), loginWindow, []store.Limit{
+			{Key: ipKey, Max: maxFailuresPerIP},
+			{Key: emailKey, Max: maxFailuresPerEmail},
+		})
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		if wait > 0 {
+			tooManyAttempts(w, wait)
+			return
+		}
+	}
+
 	u, err := h.users.ByEmail(r.Context(), in.Email)
 	hash := dummyHash
 	if err == nil {
@@ -105,8 +147,20 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	pwErr := bcrypt.CompareHashAndPassword(hash, []byte(in.Password))
 	if err != nil || pwErr != nil {
+		if h.limiter != nil {
+			// Best effort: a counting error should not turn a 401 into a 500.
+			if err := h.limiter.RecordFailure(r.Context(), loginWindow, ipKey, emailKey); err != nil {
+				log.Printf("record login failure: %v", err)
+			}
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
 		return
+	}
+	if h.limiter != nil {
+		// A correct password resets that account's counter, not the IP's.
+		if err := h.limiter.Clear(r.Context(), emailKey); err != nil {
+			log.Printf("clear login failures: %v", err)
+		}
 	}
 	if !h.startSession(w, u.ID) {
 		return
@@ -174,6 +228,39 @@ func validateSignup(in credentials) map[string]string {
 		fields["password"] = "Password must be at most 72 bytes"
 	}
 	return fields
+}
+
+func tooManyAttempts(w http.ResponseWriter, wait time.Duration) {
+	mins := int((wait + time.Minute - 1) / time.Minute)
+	w.Header().Set("Retry-After", strconv.Itoa(int((wait+time.Second-1)/time.Second)))
+	unit := "minutes"
+	if mins == 1 {
+		unit = "minute"
+	}
+	writeJSON(w, http.StatusTooManyRequests, map[string]string{
+		"error": fmt.Sprintf("Too many failed attempts. Try again in %d %s.", mins, unit),
+	})
+}
+
+// hashEmail gives a fixed-size, case-insensitive key without storing the email.
+func hashEmail(email string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(email)))
+	return hex.EncodeToString(sum[:])
+}
+
+func clientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
+		if v := strings.TrimSpace(r.Header.Get("X-Real-IP")); v != "" {
+			return v
+		}
+		if first, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ","); strings.TrimSpace(first) != "" {
+			return strings.TrimSpace(first)
+		}
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
