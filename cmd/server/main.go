@@ -10,11 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"myapp/internal/auth"
+	"myapp/internal/app"
 	"myapp/internal/config"
 	"myapp/internal/store"
 )
 
+// Standalone server for local development and for hosts that run a long-lived
+// process. On Vercel, api/index.go serves the same handler instead.
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -29,22 +31,13 @@ func main() {
 		log.Fatalf("database: %v", err)
 	}
 	defer db.Close()
-
-	mux := http.NewServeMux()
-	// Readiness probe for load balancers / orchestrators.
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := db.Ping(r.Context()); err != nil {
-			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	})
-	tokens := auth.NewTokens(cfg.JWTSecret, cfg.TokenTTL)
-	auth.New(db, tokens, cfg.SecureCookie, int(cfg.TokenTTL.Seconds())).Register(mux)
+	if err := db.Migrate(ctx); err != nil {
+		log.Fatalf("migrate: %v", err)
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           mux,
+		Handler:           app.NewHandler(cfg, db),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
