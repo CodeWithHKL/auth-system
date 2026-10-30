@@ -10,9 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"myapp/internal/app"
-	"myapp/internal/config"
-	"myapp/internal/store"
+	"myapp/serverless"
 )
 
 var (
@@ -29,18 +27,14 @@ func get() (http.Handler, error) {
 	if handler != nil {
 		return handler, nil
 	}
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, err
-	}
 	// Not the request context: the pool outlives this request.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	db, err := store.Open(ctx, cfg.DatabaseURL)
+	h, err := serverless.New(ctx)
 	if err != nil {
 		return nil, err
 	}
-	handler = app.NewHandler(cfg, db)
+	handler = h
 	return handler, nil
 }
 
