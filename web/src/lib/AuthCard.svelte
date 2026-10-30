@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, ApiError, type User } from './api'
+  import { checkStrength, type Strength } from './strength'
 
   let { onauth }: { onauth: (user: User) => void } = $props()
 
@@ -13,16 +14,26 @@
   let formError = $state('')
   let fieldErrors = $state<Record<string, string>>({})
 
-  // Strength meter: one point each for length, mixed case, digit, symbol.
-  const strength = $derived.by(() => {
-    let s = 0
-    if (password.length >= 8) s++
-    if (/[a-z]/.test(password) && /[A-Z]/.test(password)) s++
-    if (/\d/.test(password)) s++
-    if (/[^A-Za-z0-9]/.test(password)) s++
-    return password.length >= 12 && s >= 3 ? 4 : s
+  // Password strength comes from zxcvbn-ts, loaded lazily on the signup form.
+  // `seq` drops results that arrive after a newer keystroke.
+  let strength = $state<Strength | null>(null)
+  let seq = 0
+  $effect(() => {
+    if (mode !== 'signup' || !password) {
+      strength = null
+      return
+    }
+    const id = ++seq
+    checkStrength(password, [name, email]).then(
+      (r) => {
+        if (id === seq) strength = r
+      },
+      () => {
+        if (id === seq) strength = null // meter is advisory; hide it if the library failed to load
+      },
+    )
   })
-  const strengthLabel = $derived(['Too weak', 'Weak', 'Fair', 'Good', 'Strong'][strength])
+  const strengthLabel = ['Very weak', 'Weak', 'Fair', 'Good', 'Strong']
 
   function switchMode(next: Mode) {
     if (next === mode) return
@@ -136,11 +147,14 @@
       {#if fieldErrors.password}<small role="alert">{fieldErrors.password}</small>{/if}
     </div>
 
-    {#if mode === 'signup' && password}
-      <div class="meter" data-level={strength} aria-live="polite">
+    {#if mode === 'signup' && strength}
+      <div class="meter" data-level={strength.score} aria-live="polite">
         <div class="bars"><i></i><i></i><i></i><i></i></div>
-        <span>{strengthLabel}</span>
+        <span>{strengthLabel[strength.score]}</span>
       </div>
+      {#if strength.score < 3 && (strength.warning || strength.suggestion)}
+        <p class="hint">{strength.warning || strength.suggestion}</p>
+      {/if}
     {/if}
 
     {#if formError}<p class="form-error" role="alert">{formError}</p>{/if}

@@ -301,11 +301,17 @@ form {
   background: rgba(255, 255, 255, 0.14);
   transition: background 0.25s;
 }
+.meter[data-level='0'] .bars i:nth-child(-n + 1),
 .meter[data-level='1'] .bars i:nth-child(-n + 1) {
   background: #ff6b7a;
 }
 .meter[data-level='2'] .bars i:nth-child(-n + 2) {
   background: #ffb347;
+}
+.hint {
+  margin: -8px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-dim);
 }
 .meter[data-level='3'] .bars i:nth-child(-n + 3) {
   background: #c8e65c;
